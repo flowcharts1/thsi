@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>handshake</title>
+<style>
+  body { font-family: monospace; font-size: 3em; text-align: center; margin-top: 20vh; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  #otp { transition: color 0.3s; }
+  #otp.dim { color: #aaa; }
+</style>
+</head>
+<body>
+<div id="otp">------</div>
+<script>
+(async () => {
+  const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  function base32toUint8Array(b) {
+    let bits = 0, value = 0, index = 0;
+    const out = new Uint8Array(Math.ceil(b.length * 5 / 8));
+    b = b.replace(/=+$/, '').toUpperCase();
+    for (let i = 0; i < b.length; i++) {
+      const v = base32chars.indexOf(b[i]);
+      if (v === -1) continue;
+      value = (value << 5) | v; bits += 5;
+      if (bits >= 8) { out[index++] = (value >>> (bits - 8)) & 0xff; bits -= 8; }
+    }
+    return out;
+  }
+
+  async function totp(bytes, epoch) {
+    const key = await crypto.subtle.importKey("raw", bytes, {name:"HMAC",hash:"SHA-1"}, false, ["sign"]);
+    const buf = new ArrayBuffer(8);
+    new DataView(buf).setBigUint64(0, BigInt(Math.floor(epoch / 30)));
+    const hash = new Uint8Array(await crypto.subtle.sign("HMAC", key, buf));
+    const o = hash[hash.length-1] & 0xf;
+    const n = ((hash[o]&0x7f)<<24)|((hash[o+1]&0xff)<<16)|((hash[o+2]&0xff)<<8)|(hash[o+3]&0xff);
+    return (n % 1_000_000).toString().padStart(6,'0');
+  }
+
+  const secretBytes = base32toUint8Array("373BW7ZZ45KHRIFD");
+  let offset = 0;
+
+  try {
+    const t0 = Date.now();
+    const r = await fetch('https://worldtimeapi.org/api/ip', {cache:'no-store'});
+    const d = await r.json();
+    offset = d.unixtime - (t0 + Date.now()) / 2 / 1000;
+  } catch(e) {}
+
+  const el = document.getElementById('otp');
+  let code = '------';
+
+  async function update() {
+    code = await totp(secretBytes, Date.now()/1000 + offset);
+    el.textContent = code;
+  }
+
+  document.body.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(code); } catch(e) {
+      const t = document.createElement('textarea');
+      t.value = code; t.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t);
+    }
+    el.classList.add('dim');
+    setTimeout(() => el.classList.remove('dim'), 600);
+  });
+
+  await update();
+  setInterval(async () => { if (Math.floor((Date.now()/1000+offset)%30) < 1) await update(); }, 1000);
+})();
+</script>
+</body>
+</html>
